@@ -20,6 +20,8 @@ Put images or `.pdf` files into `in` folder.
 python mtg_scan_extractor.py -i in -o out
 ```
 
+Press any button when an image appears to continue.
+
 ### Alternatives
 
 1. Center based on frame rather than the card via `-c`
