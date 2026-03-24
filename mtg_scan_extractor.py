@@ -388,22 +388,23 @@ def apply_transform(
 
 
 def write_image(image: cv2.typing.MatLike, path: Path):
-    image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
     cv2.imwrite(path, image)
 
 
-# TODO
-def apply_border(img, border_size, border_color):
-    if border_size <= 0 or border_color is None:
-        return img
-    result = img.copy()
-    h, w = result.shape[:2]
-    border = min(border_size, h // 4, w // 4)
-    result[0:border, :] = border_color
-    result[h - border : h, :] = border_color
-    result[:, 0:border] = border_color
-    result[:, w - border : w] = border_color
-    return result
+def apply_border(image: cv2.typing.MatLike, dpi: int):
+    border_color = (0, 0, 0)
+
+    clean_border = image.copy()
+
+    border_height = int(BORDER_HEIGHT * dpi)
+    clean_border[:border_height, :] = border_color
+    clean_border[-border_height:, :] = border_color
+
+    border_width = int(BORDER_WIDTH * dpi)
+    clean_border[:, :border_width] = border_color
+    clean_border[:, -border_width:] = border_color
+
+    return clean_border
 
 
 def main():
@@ -481,7 +482,10 @@ def main():
                     else:
                         debug_show("Found Lines", transformed)
 
-                    write_image(transformed, output / f"{image_path.stem}_{i}.png")
+                    bordered = apply_border(transformed, dpi)
+                    debug_show("Found Lines", bordered)
+
+                    write_image(bordered, output / f"{image_path.stem}_{i}.png")
                 else:
                     print("\t\tCould not determine card boundaries...")
             else:
