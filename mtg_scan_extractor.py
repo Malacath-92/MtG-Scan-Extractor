@@ -20,13 +20,11 @@ BoundsLines = tuple[tuple[Line, Line], tuple[Line, Line]]
 
 DISPLAY_DOWNSAMPLE = 1
 
-CARD_WIDTH = 3.46
-CARD_HEIGHT = 2.48
+CARD_WIDTH = 2.48
+CARD_HEIGHT = 3.46
 
-# BORDER_WIDTH = 140 / 1200
-# BORDER_HEIGHT = 130 / 1200
-BORDER_WIDTH = 0.13916666666666666666666666666667
-BORDER_HEIGHT = 0.11791666666666666666666666666667
+BORDER_HEIGHT = 0.13916666666666666666666666666667
+BORDER_WIDTH = 0.11791666666666666666666666666667
 
 
 def get_files(folder: Path, extensions: Iterable[str]):
@@ -113,8 +111,10 @@ def extract_objects(image: cv2.typing.MatLike, dpi: int) -> list[cv2.typing.MatL
     for i in range(len(contours)):
         rect = cv2.boundingRect(contours[i])
         x, y, width, height = rect
-        if width / dpi > CARD_WIDTH and height / dpi > CARD_HEIGHT:
+        if width / dpi > CARD_WIDTH and height / dpi > CARD_WIDTH:
             crop = image[y : (y + height), x : (x + width)]
+            if width > height:
+                crop = cv2.rotate(crop, cv2.ROTATE_90_COUNTERCLOCKWISE)
             objects.append(crop)
     return objects
 
@@ -449,7 +449,7 @@ def main():
             print_verbose(f"\tDownsampling...")
             image = downsample_image(image, cli.downsample)
 
-        print_verbose("\tRoughly e<xtracting objects...")
+        print_verbose("\tRoughly extracting objects...")
         objects = extract_objects(image, dpi)
         print(f"\tFound {len(objects)} objects...")
 
