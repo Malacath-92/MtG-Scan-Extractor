@@ -4,6 +4,7 @@ import itertools
 import functools
 from collections.abc import Iterable
 from pathlib import Path
+from functools import lru_cache
 
 # 3rd-party
 import cv2
@@ -14,6 +15,7 @@ from pypdf import PdfReader
 import cli
 from cli import print_verbose
 from scan_types import *
+from utils import *
 
 
 BoundsLines = tuple[tuple[Line, Line], tuple[Line, Line]]
@@ -25,6 +27,35 @@ CARD_HEIGHT = 3.46
 
 BORDER_HEIGHT = 0.13916666666666666666666666666667
 BORDER_WIDTH = 0.11791666666666666666666666666667
+
+
+def debug_show(title: str, image: cv2.typing.MatLike, wait_key: bool = True):
+    global DISPLAY_DOWNSAMPLE
+    if DISPLAY_DOWNSAMPLE > 1:
+        image = downsample_image(image, DISPLAY_DOWNSAMPLE)
+
+    cv2.imshow(title, image)
+    if wait_key:
+        cv2.waitKey()
+
+
+def debug_show_lines(image: cv2.typing.MatLike, lines: list[Line] | BoundsLines):
+    global DISPLAY_DOWNSAMPLE
+
+    if isinstance(lines, tuple):
+        lines = list(lines[0]) + list(lines[1])
+
+    line_image = np.copy(image)
+    for line in lines:
+        cv2.line(
+            line_image,
+            (int(line.from_pos.x), int(line.from_pos.y)),
+            (int(line.to_pos.x), int(line.to_pos.y)),
+            (0, 0, 255),
+            int(DISPLAY_DOWNSAMPLE),
+        )
+
+    debug_show("Found Lines", line_image, True)
 
 
 def get_files(folder: Path, extensions: Iterable[str]):
@@ -82,28 +113,21 @@ def downsample_image(image: cv2.typing.MatLike, factor: int):
     )
 
 
-erode_size = 3
-erode_shape = cv2.MORPH_ELLIPSE
-erode_element = cv2.getStructuringElement(
-    erode_shape,
-    (2 * erode_size + 1, 2 * erode_size + 1),
-    (erode_size, erode_size),
-)
-
-grow_size = 10
-grow_shape = cv2.MORPH_ELLIPSE
-grow_element = cv2.getStructuringElement(
-    grow_shape,
-    (2 * grow_size + 1, 2 * grow_size + 1),
-    (grow_size, grow_size),
-)
+@lru_cache
+def get_erode_dilate_element(kernel_size: int):
+    shape = cv2.MORPH_ELLIPSE
+    return cv2.getStructuringElement(
+        shape,
+        (2 * kernel_size + 1, 2 * kernel_size + 1),
+        (kernel_size, kernel_size),
+    )
 
 
 def extract_objects(image: cv2.typing.MatLike, dpi: int) -> list[cv2.typing.MatLike]:
     grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(grayscale, 254, 255, cv2.THRESH_BINARY_INV)
-    erode = cv2.erode(thresh, erode_element)
-    dilate = cv2.dilate(erode, grow_element)
+    erode = cv2.erode(thresh, get_erode_dilate_element(3))
+    dilate = cv2.dilate(erode, get_erode_dilate_element(10))
     blurred = cv2.GaussianBlur(dilate, (15, 15), 0)
     contours, _ = cv2.findContours(blurred, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -302,35 +326,6 @@ def find_boundaries(
     return (left_line, right_line), (top_line, bottom_line)
 
 
-def debug_show(title: str, image: cv2.typing.MatLike, wait_key: bool = True):
-    global DISPLAY_DOWNSAMPLE
-    if DISPLAY_DOWNSAMPLE > 1:
-        image = downsample_image(image, DISPLAY_DOWNSAMPLE)
-
-    cv2.imshow(title, image)
-    if wait_key:
-        cv2.waitKey()
-
-
-def debug_show_lines(image: cv2.typing.MatLike, lines: list[Line] | BoundsLines):
-    global DISPLAY_DOWNSAMPLE
-
-    if isinstance(lines, tuple):
-        lines = list(lines[0]) + list(lines[1])
-
-    line_image = np.copy(image)
-    for line in lines:
-        cv2.line(
-            line_image,
-            (int(line.from_pos.x), int(line.from_pos.y)),
-            (int(line.to_pos.x), int(line.to_pos.y)),
-            (0, 0, 255),
-            int(DISPLAY_DOWNSAMPLE),
-        )
-
-    debug_show("Found Lines", line_image, True)
-
-
 def extract_transform(
     image: cv2.typing.MatLike, bounds: BoundsLines, dpi: int
 ) -> Transform:
@@ -387,10 +382,6 @@ def apply_transform(
     return cropped_image
 
 
-def write_image(image: cv2.typing.MatLike, path: Path):
-    cv2.imwrite(path, image)
-
-
 def apply_border(image: cv2.typing.MatLike, dpi: int):
     border_color = (0, 0, 0)
 
@@ -405,6 +396,10 @@ def apply_border(image: cv2.typing.MatLike, dpi: int):
     clean_border[:, -border_width:] = border_color
 
     return clean_border
+
+
+def write_image(image: cv2.typing.MatLike, path: Path):
+    cv2.imwrite(path, image)
 
 
 def main():
