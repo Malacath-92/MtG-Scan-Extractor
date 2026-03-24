@@ -1,0 +1,4 @@
+opencv-python
+numpy
+pypdf
+pypdf[image]
