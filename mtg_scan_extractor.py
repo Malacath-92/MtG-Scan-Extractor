@@ -2,6 +2,7 @@
 import os
 import itertools
 import functools
+from dataclasses import dataclass, field
 from collections.abc import Iterable
 from pathlib import Path
 from functools import lru_cache
@@ -22,11 +23,19 @@ BoundsLines = tuple[tuple[Line, Line], tuple[Line, Line]]
 
 DISPLAY_DOWNSAMPLE = 1
 
-CARD_WIDTH = 2.48
+# All measures in inches
 CARD_HEIGHT = 3.46
+FRAME_HEIGHT = 3.18
+BORDER_HEIGHT = (CARD_HEIGHT - FRAME_HEIGHT) / 2
+TARGET_HEIGHT = FRAME_HEIGHT if cli.center else CARD_HEIGHT
 
-BORDER_HEIGHT = 0.13916666666666666666666666666667
-BORDER_WIDTH = 0.11791666666666666666666666666667
+CARD_WIDTH = 2.48
+FRAME_WIDTH = 2.245
+BORDER_WIDTH = (CARD_WIDTH - FRAME_WIDTH) / 2
+TARGET_WIDTH = FRAME_WIDTH if cli.center else CARD_WIDTH
+
+POSITION_MARGIN = 0.002
+SIZE_MARGIN = 0.005
 
 
 def debug_show(title: str, image: cv2.typing.MatLike, wait_key: bool = True):
@@ -124,11 +133,14 @@ def get_erode_dilate_element(kernel_size: int):
 
 
 def extract_objects(image: cv2.typing.MatLike, dpi: int) -> list[cv2.typing.MatLike]:
+    blur_kernel = 60 / (1200 / dpi)
+    blur_kernel = int(2 * (blur_kernel // 2) + 1)
+
     grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(grayscale, 254, 255, cv2.THRESH_BINARY_INV)
     erode = cv2.erode(thresh, get_erode_dilate_element(3))
     dilate = cv2.dilate(erode, get_erode_dilate_element(10))
-    blurred = cv2.GaussianBlur(dilate, (15, 15), 0)
+    blurred = cv2.GaussianBlur(dilate, (blur_kernel, blur_kernel), 0)
     contours, _ = cv2.findContours(blurred, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     objects = []
@@ -143,12 +155,13 @@ def extract_objects(image: cv2.typing.MatLike, dpi: int) -> list[cv2.typing.MatL
     return objects
 
 
-def find_lines(
-    image: cv2.typing.MatLike, downsample: int, kernel_size: int = 9
-) -> list[Line] | None:
+def find_lines(image: cv2.typing.MatLike, downsample: int) -> list[Line] | None:
+    blur_kernel = 18 / downsample
+    blur_kernel = int(2 * (blur_kernel // 2) + 1)
+
     grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(grayscale, 70, 150, cv2.THRESH_BINARY)
-    thresh = cv2.GaussianBlur(thresh, (kernel_size, kernel_size), 0)
+    thresh = cv2.GaussianBlur(thresh, (blur_kernel, blur_kernel), 0)
     _, thresh = cv2.threshold(thresh, 70, 150, cv2.THRESH_BINARY)
 
     low_threshold = 50
@@ -183,85 +196,116 @@ def find_lines(
 def find_boundaries(
     image: cv2.typing.MatLike, lines: list[Line], dpi: int
 ) -> BoundsLines | None:
-    target_width = CARD_WIDTH - 2 * BORDER_WIDTH if cli.center else CARD_WIDTH
-    target_height = CARD_HEIGHT - 2 * BORDER_HEIGHT if cli.center else CARD_HEIGHT
+    @dataclass
+    class LinesPair:
+        left_top: set[int] = field(default_factory=set)
+        right_bottom: set[int] = field(default_factory=set)
 
-    vertical_lines = {}
-    horizontal_lines = {}
+        def add_line_pair(self, lhs_i: int, rhs_i: int, vertical: bool):
+            lhs: Line = lines[lhs_i]
+            rhs: Line = lines[rhs_i]
+            if vertical:
+                if lhs.from_pos.x > rhs.from_pos.x:
+                    lhs_i, rhs_i = rhs_i, lhs_i
+                self.left_top.add(lhs_i)
+                self.right_bottom.add(rhs_i)
+            else:
+                if lhs.from_pos.y > rhs.from_pos.y:
+                    lhs_i, rhs_i = rhs_i, lhs_i
+                self.left_top.add(lhs_i)
+                self.right_bottom.add(rhs_i)
+
+        def lines(self):
+            return list(lines[i] for i in self.left_top | self.right_bottom)
+
+    vertical_lines: dict[float, LinesPair] = {}
+    horizontal_lines: dict[float, LinesPair] = {}
     for i, lhs in enumerate(lines[:-1]):
         for j in range(i + 1, len(lines) - 1):
             rhs = lines[j]
             if lhs.parallel(rhs):
                 dist = lhs.dist(rhs) / dpi
-                if lhs.vertical and abs(dist - target_width) < 0.01:
+                if lhs.vertical and abs(dist - TARGET_WIDTH) < POSITION_MARGIN:
                     lhs_x = (lhs.from_pos.x + lhs.to_pos.x) / 2
                     rhs_x = (rhs.from_pos.x + rhs.to_pos.x) / 2
                     pair_x = min(lhs_x, rhs_x)
 
                     new_list = True
                     for x, vlines in vertical_lines.items():
-                        if abs(x - pair_x) < 0.01:
-                            vlines.add(i)
-                            vlines.add(j)
+                        if abs(x - pair_x) < POSITION_MARGIN:
+                            vlines.add_line_pair(i, j, True)
                             new_list = False
                             break
 
                     if new_list:
-                        vertical_lines[pair_x] = set([i, j])
-                elif lhs.horizontal and abs(dist - target_height) < 0.01:
+                        new_pair = LinesPair()
+                        new_pair.add_line_pair(i, j, True)
+                        vertical_lines[pair_x] = new_pair
+                elif lhs.horizontal and abs(dist - TARGET_HEIGHT) < SIZE_MARGIN:
                     lhs_y = (lhs.from_pos.y + lhs.to_pos.y) / 2
                     rhs_y = (rhs.from_pos.y + rhs.to_pos.y) / 2
                     pair_y = min(lhs_y, rhs_y)
 
                     new_list = True
                     for y, hlines in horizontal_lines.items():
-                        if abs(y - pair_y) < 0.01:
-                            hlines.add(i)
-                            hlines.add(j)
+                        if abs(y - pair_y) < POSITION_MARGIN:
+                            hlines.add_line_pair(i, j, False)
                             new_list = False
                             break
 
                     if new_list:
-                        horizontal_lines[pair_y] = set([i, j])
+                        new_pair = LinesPair()
+                        new_pair.add_line_pair(i, j, False)
+                        horizontal_lines[pair_y] = new_pair
 
-    for k, v in list(vertical_lines.items()):
-        vertical_lines[k] = [lines[i] for i in v]
-    for k, v in list(horizontal_lines.items()):
-        horizontal_lines[k] = [lines[i] for i in v]
+    all_lines = []
+    all_lines += itertools.chain.from_iterable(
+        p.lines() for p in vertical_lines.values()
+    )
+    all_lines += itertools.chain.from_iterable(
+        p.lines() for p in horizontal_lines.values()
+    )
+    debug_show_lines(image, all_lines)
 
     h, w = image.shape[:2]
 
     if len(vertical_lines) > 1:
 
-        def get_center_deviation(lines: list[Line]):
-            points = list(
-                itertools.chain.from_iterable([(l.from_pos, l.to_pos) for l in lines])
-            )
-            x_coords = [int(p.x) for p in points]
-            average_x = sum(x_coords) / len(x_coords)
-            return abs(w / 2 - average_x)
+        def get_deviation_score(lines_pair: LinesPair):
+            left_lines = [lines[i] for i in lines_pair.left_top]
+            lefts = [(l.from_pos.x + l.to_pos.x) // 2 for l in left_lines]
+            average_left = sum(lefts) / len(lefts)
+
+            right_lines = [lines[i] for i in lines_pair.right_bottom]
+            rights = [(l.from_pos.x + l.to_pos.x) // 2 for l in right_lines]
+            average_right = w - sum(rights) / len(rights)
+
+            return abs(average_left - average_right)
 
         lists = list(vertical_lines.values())
-        deviations = list(map(get_center_deviation, lists))
-        vertical_lines = lists[np.argmin(deviations)]
+        deviations = list(map(get_deviation_score, lists))
+        vertical_lines = lists[np.argmin(deviations)].lines()
     else:
-        vertical_lines = list(vertical_lines.values())[0]
+        vertical_lines = list(vertical_lines.values())[0].lines()
 
     if len(horizontal_lines) > 1:
 
-        def get_center_deviation(lines: list[Line]):
-            points = list(
-                itertools.chain.from_iterable([(l.from_pos, l.to_pos) for l in lines])
-            )
-            y_coords = [int(p.y) for p in points]
-            average_y = sum(y_coords) / len(y_coords)
-            return abs(h / 2 - average_y)
+        def get_deviation_score(lines_pair: LinesPair):
+            top_lines = [lines[i] for i in lines_pair.left_top]
+            tops = [(l.from_pos.y + l.to_pos.y) // 2 for l in top_lines]
+            average_top = sum(tops) / len(tops)
+
+            bottom_lines = [lines[i] for i in lines_pair.right_bottom]
+            bottoms = [(l.from_pos.y + l.to_pos.y) // 2 for l in bottom_lines]
+            average_bottom = h - sum(bottoms) / len(bottoms)
+
+            return abs(average_top - average_bottom)
 
         lists = list(horizontal_lines.values())
-        deviations = list(map(get_center_deviation, lists))
-        horizontal_lines = lists[np.argmin(deviations)]
+        deviations = list(map(get_deviation_score, lists))
+        horizontal_lines = lists[np.argmin(deviations)].lines()
     else:
-        horizontal_lines = list(horizontal_lines.values())[0]
+        horizontal_lines = list(horizontal_lines.values())[0].lines()
 
     if len(vertical_lines) < 2 or len(horizontal_lines) < 2:
         return None
@@ -459,14 +503,17 @@ def main():
                     debug_show_lines(obj, bounds)
 
                     transform = extract_transform(obj, bounds, dpi)
+                    print_verbose(
+                        f"Found transform: alpha={transform.rotation}, offset=({transform.translation.x}, {transform.translation.y})"
+                    )
                     transformed = apply_transform(obj, transform, dpi)
 
                     if cli.center:
                         h, w = transformed.shape[:2]
                         border_left = BORDER_WIDTH * dpi
-                        border_right = CARD_WIDTH * dpi - border_left
+                        border_right = border_left + FRAME_WIDTH * dpi
                         border_top = BORDER_HEIGHT * dpi
-                        border_bottom = CARD_HEIGHT * dpi - border_top
+                        border_bottom = border_top + FRAME_HEIGHT * dpi
                         ideal_lines = [
                             Line(Vec(border_left, 0), Vec(border_left, h)),
                             Line(Vec(border_right, 0), Vec(border_right, h)),
