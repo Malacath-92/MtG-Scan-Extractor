@@ -38,7 +38,7 @@ POSITION_MARGIN = 0.002
 SIZE_MARGIN = 0.025
 
 BORDER_COLOR = (0, 0, 0)
-BORDER_MARGIN = 25  # pixels
+BORDER_MARGIN = 10  # pixels
 
 
 def debug_show(title: str, image: cv2.typing.MatLike, wait_key: bool = True):
