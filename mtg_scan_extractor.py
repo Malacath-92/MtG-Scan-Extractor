@@ -30,18 +30,21 @@ BORDER_HEIGHT = (CARD_HEIGHT - FRAME_HEIGHT) / 2
 TARGET_HEIGHT = FRAME_HEIGHT if cli.center else CARD_HEIGHT
 
 CARD_WIDTH = 2.48
-FRAME_WIDTH = 2.245
+FRAME_WIDTH = 2.25
 BORDER_WIDTH = (CARD_WIDTH - FRAME_WIDTH) / 2
 TARGET_WIDTH = FRAME_WIDTH if cli.center else CARD_WIDTH
 
 POSITION_MARGIN = 0.002
-SIZE_MARGIN = 0.005
+SIZE_MARGIN = 0.025
 
 
 def debug_show(title: str, image: cv2.typing.MatLike, wait_key: bool = True):
     global DISPLAY_DOWNSAMPLE
     if DISPLAY_DOWNSAMPLE > 1:
         image = downsample_image(image, DISPLAY_DOWNSAMPLE)
+
+    if cli.display_rotation:
+        image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
 
     cv2.imshow(title, image)
     if wait_key:
@@ -160,17 +163,12 @@ def find_lines(image: cv2.typing.MatLike, downsample: int) -> list[Line] | None:
     blur_kernel = int(2 * (blur_kernel // 2) + 1)
 
     grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(grayscale, 70, 150, cv2.THRESH_BINARY)
-    thresh = cv2.GaussianBlur(thresh, (blur_kernel, blur_kernel), 0)
-    _, thresh = cv2.threshold(thresh, 70, 150, cv2.THRESH_BINARY)
+    blurred = cv2.GaussianBlur(grayscale, (blur_kernel, blur_kernel), 0)
+    _, thresh = cv2.threshold(blurred, 25, 255, cv2.THRESH_BINARY)
 
     low_threshold = 50
     high_threshold = 150
     edges = cv2.Canny(thresh, low_threshold, high_threshold)
-
-    # debug_show("Base Image", image, False)
-    # debug_show("Threshold", thresh, False)
-    debug_show("Edges", edges, True)
 
     rho = 1  # distance resolution in pixels of the Hough grid
     theta = np.pi / 360  # angular resolution in radians of the Hough grid
@@ -225,7 +223,7 @@ def find_boundaries(
             rhs = lines[j]
             if lhs.parallel(rhs):
                 dist = lhs.dist(rhs) / dpi
-                if lhs.vertical and abs(dist - TARGET_WIDTH) < POSITION_MARGIN:
+                if lhs.vertical and abs(dist - TARGET_WIDTH) < SIZE_MARGIN:
                     lhs_x = (lhs.from_pos.x + lhs.to_pos.x) / 2
                     rhs_x = (rhs.from_pos.x + rhs.to_pos.x) / 2
                     pair_x = min(lhs_x, rhs_x)
@@ -269,7 +267,9 @@ def find_boundaries(
 
     h, w = image.shape[:2]
 
-    if len(vertical_lines) > 1:
+    if not vertical_lines:
+        return None
+    elif len(vertical_lines) > 1:
 
         def get_deviation_score(lines_pair: LinesPair):
             left_lines = [lines[i] for i in lines_pair.left_top]
@@ -288,7 +288,9 @@ def find_boundaries(
     else:
         vertical_lines = list(vertical_lines.values())[0].lines()
 
-    if len(horizontal_lines) > 1:
+    if not horizontal_lines:
+        return None
+    elif len(horizontal_lines) > 1:
 
         def get_deviation_score(lines_pair: LinesPair):
             top_lines = [lines[i] for i in lines_pair.left_top]

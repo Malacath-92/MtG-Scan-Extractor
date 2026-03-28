@@ -18,7 +18,10 @@ __parser__.add_argument(
     "-d", "--downsample", type=int, default=1, help="Factor by which to downsample images."
 )
 __parser__.add_argument(
-    "-dd", "--display_downsample", type=int, default=5, help="Factor by which to downsample images before showing them to the user."
+    "-dd", "--display-downsample", type=int, default=5, help="Factor by which to downsample images before showing them to the user."
+)
+__parser__.add_argument(
+    "-dr", "--display-rotation", action="store_true", help="When passed, rotates images when showing them to the user."
 )
 __parser__.add_argument(
     "-c", "--center", default=False, action="store_true", help="Center the frame rather than the physical card."
@@ -34,6 +37,7 @@ input = __args__.input
 output = __args__.output
 downsample = __args__.downsample
 display_downsample = __args__.display_downsample
+display_rotation = __args__.display_rotation
 center = __args__.center
 
 
