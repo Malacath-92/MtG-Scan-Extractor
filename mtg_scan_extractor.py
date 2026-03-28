@@ -37,6 +37,9 @@ TARGET_HEIGHT = FRAME_HEIGHT if cli.center else CARD_HEIGHT
 POSITION_MARGIN = 0.002
 SIZE_MARGIN = 0.025
 
+BORDER_COLOR = (0, 0, 0)
+BORDER_MARGIN = 25  # pixels
+
 
 def debug_show(title: str, image: cv2.typing.MatLike, wait_key: bool = True):
     global DISPLAY_DOWNSAMPLE
@@ -333,14 +336,16 @@ def find_boundaries(
         top_lines = [l for l in vertical_lines if l.intercept > w / 2]
         bottom_lines = [l for l in vertical_lines if l.intercept < w / 2]
         vertical_lines = [average_lines(top_lines), average_lines(bottom_lines)]
-    elif vertical_lines[0].intercept > vertical_lines[1].intercept:
-        vertical_lines = [vertical_lines[1], vertical_lines[0]]
 
     if len(horizontal_lines) > 2:
         left_lines = [l for l in horizontal_lines if l.intercept < h / 2]
         right_lines = [l for l in horizontal_lines if l.intercept > h / 2]
         horizontal_lines = [average_lines(left_lines), average_lines(right_lines)]
-    elif horizontal_lines[0].intercept > horizontal_lines[1].intercept:
+
+    if vertical_lines[0].intercept > vertical_lines[1].intercept:
+        vertical_lines = [vertical_lines[1], vertical_lines[0]]
+
+    if horizontal_lines[0].intercept > horizontal_lines[1].intercept:
         horizontal_lines = [horizontal_lines[1], horizontal_lines[0]]
 
     def find_intersection(lhs: Line, rhs: Line) -> Vec:
@@ -438,18 +443,21 @@ def apply_transform(
     return cropped_image, transformed_bounds
 
 
-def apply_border(image: cv2.typing.MatLike, dpi: int):
-    border_color = (0, 0, 0)
-
+def apply_border(image: cv2.typing.MatLike, bounds: BoundsLines):
     clean_border = image.copy()
 
-    border_height = int(BORDER_HEIGHT * dpi)
-    clean_border[:border_height, :] = border_color
-    clean_border[-border_height:, :] = border_color
+    (left, right), (top, bottom) = bounds
 
-    border_width = int(BORDER_WIDTH * dpi)
-    clean_border[:, :border_width] = border_color
-    clean_border[:, -border_width:] = border_color
+    left = int((left.from_pos.x + left.to_pos.x) / 2) - BORDER_MARGIN
+    right = int((right.from_pos.x + right.to_pos.x) / 2) + BORDER_MARGIN
+    top = int((top.from_pos.y + top.to_pos.y) / 2) - BORDER_MARGIN
+    bottom = int((bottom.from_pos.y + bottom.to_pos.y) / 2) + BORDER_MARGIN
+
+    clean_border[:, :left] = BORDER_COLOR
+    clean_border[:, right:] = BORDER_COLOR
+
+    clean_border[:top, :] = BORDER_COLOR
+    clean_border[bottom:, :] = BORDER_COLOR
 
     return clean_border
 
@@ -515,8 +523,11 @@ def main():
                     debug_show_lines(obj, bounds)
 
                     transform = extract_transform(obj, bounds, dpi)
+                    alpha = transform.rotation
+                    dx = int(transform.translation.x)
+                    dy = int(transform.translation.y)
                     print_verbose(
-                        f"\t\tFound transform: alpha={transform.rotation:.4f}, offset=({transform.translation.x:.0}, {transform.translation.y:.0f})"
+                        f"\t\tFound transform: {alpha=:.4f}, offset=({dx}, {dy})"
                     )
                     transformed, transformed_bounds = apply_transform(
                         obj, bounds, transform, dpi
@@ -538,7 +549,7 @@ def main():
                     else:
                         debug_show("Found Lines", transformed)
 
-                    bordered = apply_border(transformed, dpi)
+                    bordered = apply_border(transformed, transformed_bounds)
                     debug_show("Found Lines", bordered)
 
                     write_image(bordered, output / f"{image_path.stem}_{i}.png")
