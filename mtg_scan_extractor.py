@@ -24,15 +24,15 @@ BoundsLines = tuple[tuple[Line, Line], tuple[Line, Line]]
 DISPLAY_DOWNSAMPLE = 1
 
 # All measures in inches
-CARD_HEIGHT = 3.46
-FRAME_HEIGHT = 3.18
-BORDER_HEIGHT = (CARD_HEIGHT - FRAME_HEIGHT) / 2
-TARGET_HEIGHT = FRAME_HEIGHT if cli.center else CARD_HEIGHT
-
 CARD_WIDTH = 2.48
 FRAME_WIDTH = 2.25
 BORDER_WIDTH = (CARD_WIDTH - FRAME_WIDTH) / 2
 TARGET_WIDTH = FRAME_WIDTH if cli.center else CARD_WIDTH
+
+CARD_HEIGHT = 3.46
+FRAME_HEIGHT = 3.18
+BORDER_HEIGHT = (CARD_HEIGHT - FRAME_HEIGHT) / 2
+TARGET_HEIGHT = FRAME_HEIGHT if cli.center else CARD_HEIGHT
 
 POSITION_MARGIN = 0.002
 SIZE_MARGIN = 0.025
@@ -379,28 +379,30 @@ def extract_transform(
 
     h, w = image.shape[:2]
     pivot = Vec(w // 2, h // 2)
+
+    do_rotate = lambda l: l.rotate(angle, pivot)
     rotated_bounds = (
-        (
-            bounds[0][0].rotate(angle, pivot),
-            bounds[0][1].rotate(angle, pivot),
-        ),
-        (
-            bounds[1][0].rotate(angle, pivot),
-            bounds[1][1].rotate(angle, pivot),
-        ),
+        tuple(map(do_rotate, bounds[0])),
+        tuple(map(do_rotate, bounds[1])),
     )
 
-    lines = list(rotated_bounds[0]) + list(rotated_bounds[1])
-    points = list(
-        itertools.chain.from_iterable([(l.from_pos, l.to_pos) for l in lines])
-    )
-    x_coords = [int(p.x) for p in points]
-    y_coords = [int(p.y) for p in points]
+    (left_line, right_line), (top_line, bottom_line) = rotated_bounds
 
-    offset = Vec(min(x_coords), min(y_coords))
-    if cli.center:
-        offset.x -= BORDER_WIDTH * dpi
-        offset.y -= BORDER_HEIGHT * dpi
+    left = (left_line.from_pos.x + left_line.to_pos.x) / 2
+    right = (right_line.from_pos.x + right_line.to_pos.x) / 2
+    top = (top_line.from_pos.y + top_line.to_pos.y) / 2
+    bottom = (bottom_line.from_pos.y + bottom_line.to_pos.y) / 2
+
+    width = right - left
+    height = bottom - top
+
+    final_width = int(CARD_WIDTH * dpi)
+    final_height = int(CARD_HEIGHT * dpi)
+
+    final_x = (final_width - width) // 2
+    final_y = (final_height - height) // 2
+
+    offset = Vec(left - final_x, top - final_y)
 
     return Transform(angle, offset)
 
@@ -506,7 +508,7 @@ def main():
 
                     transform = extract_transform(obj, bounds, dpi)
                     print_verbose(
-                        f"Found transform: alpha={transform.rotation}, offset=({transform.translation.x}, {transform.translation.y})"
+                        f"\t\tFound transform: alpha={transform.rotation:.4f}, offset=({transform.translation.x:.0}, {transform.translation.y:.0f})"
                     )
                     transformed = apply_transform(obj, transform, dpi)
 
