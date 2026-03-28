@@ -408,8 +408,8 @@ def extract_transform(
 
 
 def apply_transform(
-    image: cv2.typing.MatLike, transform: Transform, dpi: int
-) -> cv2.typing.MatLike:
+    image: cv2.typing.MatLike, bounds: BoundsLines, transform: Transform, dpi: int
+) -> tuple[cv2.typing.MatLike, BoundsLines]:
     h, w = image.shape[:2]
     center = (w // 2, h // 2)
     matrix = cv2.getRotationMatrix2D(center, transform.rotation * 180 / np.pi, 1.0)
@@ -427,7 +427,15 @@ def apply_transform(
     cropped_image = rotated_image[
         offset.y : offset.y + size.y, offset.x : offset.x + size.x
     ]
-    return cropped_image
+
+    pivot = Vec(w // 2, h // 2)
+    do_transform = lambda l: l.rotate(transform.rotation, pivot).offset(-offset)
+    transformed_bounds = (
+        tuple(map(do_transform, bounds[0])),
+        tuple(map(do_transform, bounds[1])),
+    )
+
+    return cropped_image, transformed_bounds
 
 
 def apply_border(image: cv2.typing.MatLike, dpi: int):
@@ -510,7 +518,9 @@ def main():
                     print_verbose(
                         f"\t\tFound transform: alpha={transform.rotation:.4f}, offset=({transform.translation.x:.0}, {transform.translation.y:.0f})"
                     )
-                    transformed = apply_transform(obj, transform, dpi)
+                    transformed, transformed_bounds = apply_transform(
+                        obj, bounds, transform, dpi
+                    )
 
                     if cli.center:
                         h, w = transformed.shape[:2]
